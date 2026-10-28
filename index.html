@@ -539,10 +539,63 @@ body { background: var(--fondo); color: var(--ink); font-family: var(--body); ov
       }
     }
     const crash = t => { noise(t, 'highpass', 4500, 0.55, 1.4).connect(room); };
+    // The dark break: after two passes of the riff the band drops out for four bars of
+    // drone, ghost choir, a tolling bell and a heartbeat, then a riser brings the metal back.
+    function drone(t, dur) {
+      const lp = AC.createBiquadFilter(), g = AC.createGain();
+      lp.type = 'lowpass'; lp.Q.value = 4;
+      lp.frequency.setValueAtTime(120, t); lp.frequency.linearRampToValueAtTime(520, t + dur * 0.5); lp.frequency.linearRampToValueAtTime(120, t + dur);
+      g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.025, t + 1.2); g.gain.setValueAtTime(0.025, t + dur - 1.2); g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      for (const [fr, det] of [[C2 / 2, -6], [C2 / 2, 6], [C2 * 0.7071, 0], [C2, 3]]) osc('sawtooth', fr, t, t + dur + 0.05, lp, det);
+      lp.connect(g); g.connect(out); g.connect(room);
+    }
+    function choir(t, f, dur) {
+      const mix = AC.createGain(), g = AC.createGain();
+      const vib = AC.createOscillator(), vg = AC.createGain(); vib.frequency.value = 4.5; vg.gain.value = f * 0.006;
+      vib.connect(vg); vib.start(t); vib.stop(t + dur + 0.05);
+      [-10, 10].forEach(det => { const o = osc('sawtooth', f, t, t + dur + 0.05, mix, det); vg.connect(o.frequency); });
+      FORMANTS.o.forEach(([fr, lv, q]) => {
+        const bp = AC.createBiquadFilter(), bl = AC.createGain();
+        bp.type = 'bandpass'; bp.frequency.value = fr; bp.Q.value = q; bl.gain.value = lv;
+        mix.connect(bp).connect(bl).connect(g);
+      });
+      g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.07, t + 1.5); g.gain.setValueAtTime(0.07, t + dur - 1); g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      g.connect(out); g.connect(room);
+    }
+    function bell(t, f) {
+      [[1, 0.1], [2.76, 0.055], [5.4, 0.028], [8.93, 0.014]].forEach(([k, a]) => {
+        const g = AC.createGain(); env(g, t, a, 3.6, 0.002);
+        osc('sine', f * k, t, t + 3.7, g); g.connect(out); g.connect(room);
+      });
+    }
+    function heart(t, a) {
+      const o = AC.createOscillator(), g = AC.createGain();
+      o.frequency.setValueAtTime(70, t); o.frequency.exponentialRampToValueAtTime(38, t + 0.12);
+      env(g, t, a, 0.2, 0.004); o.connect(g).connect(out); o.start(t); o.stop(t + 0.25);
+    }
+    function riser(t, dur) {
+      const s = AC.createBufferSource(), bp = AC.createBiquadFilter(), g = AC.createGain();
+      s.buffer = noiseBuf; s.loop = true; bp.type = 'bandpass'; bp.Q.value = 3;
+      bp.frequency.setValueAtTime(300, t); bp.frequency.exponentialRampToValueAtTime(5000, t + dur);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.5, t + dur); g.gain.setValueAtTime(0.0001, t + dur + 0.01);
+      s.connect(bp).connect(g).connect(out); s.start(t); s.stop(t + dur + 0.02);
+    }
+    function ambient(t, abar, st, sixteenth) {
+      const barLen = 16 * sixteenth;
+      if (abar === 0 && st === 0) {
+        drone(t, 4 * barLen);
+        [[C2 * 2, 0], [C2 * 2 * Math.pow(2, 3 / 12), 0.4], [C2 * 2 * Math.pow(2, 6 / 12), 0.8]].forEach(([f, d]) => choir(t + d, f, 4 * barLen - d));
+      }
+      if (st === 0) bell(t, abar % 2 ? C2 * 2 * Math.pow(2, 6 / 12) : C2 * 2);
+      if (st === 0 || st === 3) heart(t, st === 0 ? 0.7 : 0.45);
+      if (abar === 3 && st === 8) riser(t, 8 * sixteenth);
+    }
     function tick() {
       const boss = api.boss, sixteenth = 60 / (boss ? 168 : 140) / 4;
       while (next < AC.currentTime + 0.12) {
-        const bar = Math.floor(step / 16) % 8, st = step % 16, row = RIFF[bar];
+        const cyc = Math.floor(step / 16) % 20, st = step % 16;
+        if (!boss && cyc >= 16) { ambient(next, cyc - 16, st, sixteenth); next += sixteenth; step++; continue; }
+        const bar = cyc % 8, row = RIFF[bar];
         const n = parse(row, st);
         if (n) guitar(next, n.semi, n.len * sixteenth, n.mute);
         const chord = bar === 3 || bar === 7;
