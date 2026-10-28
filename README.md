@@ -24,7 +24,7 @@ Hay tres dificultades (Tranquila, Normal y Desafío), y cada una guarda su réco
 | Fondo | Tejido a punto jersey; tus lazos tejen una manta | Piso de piedra; tus lazos queman pentagramas y dejan sangre |
 | Enemigos | Polilla, galgo, tijera, nudo, alfiletero, botón dorado | Polilla calavera, Cancerbero, guadaña, entrañas, corazón vudú, alma en pena |
 | Jefe | Polilla Reina | Baphomet |
-| Música | — | Metal con guitarras en drop C y doble bombo; el jefe gruñe su nombre |
+| Música | Folk acogedor: guitarra de nylon, cajita de música y escobillas; con la Polilla Reina se vuelve una danza en menor | Metal con guitarras en drop C, doble bombo y pausas tenebrosas; el jefe tiene su propio riff y gruñe su nombre |
 
 En el tema Tejido puedes elegir el punto de tu manta: jersey, elástico 2×2, cesta, panal o trenzas.
 

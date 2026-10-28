@@ -360,7 +360,7 @@ body { background: var(--fondo); color: var(--ink); font-family: var(--body); ov
 
   // DOOM-style metal for the hell theme, synthesized live. Drop-C guitars double-tracked left and right,
   // a gritty bass, punchy drums with a room reverb, and the boss growling its own name.
-  const music = (() => {
+  const metal = (() => {
     let timer = null, next = 0, step = 0, out = null, gtrL = null, gtrR = null, bassIn = null, room = null, noiseBuf = null;
     const C2 = 65.41;
     // one char per 16th: '.' rest, '-' hold, lowercase = palm-muted chug, uppercase = open power chord
@@ -590,21 +590,64 @@ body { background: var(--fondo); color: var(--ink); font-family: var(--body); ov
       if (st === 0 || st === 3) heart(t, st === 0 ? 0.7 : 0.45);
       if (abar === 3 && st === 8) riser(t, 8 * sixteenth);
     }
+    // The boss has its own riff: a tremolo-picked line climbing through the tritone over a low
+    // pedal bass, nonstop double kick, and a closing bar of chugs.
+    const BOSS = [
+      [[12, 8], [13, 8]], [[15, 8], [13, 4], [12, 4]], [[18, 8], [17, 4], [15, 4]], [[13, 8], [12, 8]],
+      [[12, 8], [13, 8]], [[15, 8], [18, 8]], [[19, 8], [18, 4], [17, 4]], null
+    ];
+    const BOSS_BASS = [[0, 0], [0, 0], [6, 6], [1, 0], [0, 0], [3, 6], [7, 6], null];
+    const BOSS_CHUGS = 'xxxxxxxxF---F---';
+    function trem(t, semi, dur) {
+      const f = C2 * Math.pow(2, semi / 12);
+      [[gtrL, -7, 0], [gtrR, 7, 0.004]].forEach(([amp, det, lag]) => {
+        const s = t + lag, g = AC.createGain(), lp = AC.createBiquadFilter();
+        lp.type = 'lowpass'; lp.frequency.value = 3600;
+        env(g, s, 0.5, dur * 0.95, 0.002);
+        osc('sawtooth', f, s, s + dur + 0.03, lp, det);
+        osc('sawtooth', f * 2, s, s + dur + 0.03, lp, -det);
+        osc('square', f / 2, s, s + dur + 0.03, lp, det);
+        lp.connect(g).connect(amp);
+      });
+    }
+    function pedal(t, semi, dur) {
+      const f = C2 * Math.pow(2, semi / 12), g = AC.createGain(); env(g, t, 0.8, dur, 0.005);
+      osc('sawtooth', f / 2, t, t + dur + 0.05, g); osc('sine', f / 2, t, t + dur + 0.05, g);
+      g.connect(bassIn);
+    }
+    function bossStep(t, bar, st, sixteenth) {
+      const segs = BOSS[bar];
+      if (segs) {
+        let acc = 0;
+        for (const [semi, len] of segs) {
+          if (st >= acc && st < acc + len) { trem(t, semi, sixteenth / 2); trem(t + sixteenth / 2, semi, sixteenth / 2); break; }
+          acc += len;
+        }
+        if (st % 8 === 0) pedal(t, BOSS_BASS[bar][st / 8], 8 * sixteenth);
+        kick(t);
+        if (st === 4 || st === 12) snare(t);
+      } else {
+        const n = parse(BOSS_CHUGS, st);
+        if (n) { guitar(t, n.semi, n.len * sixteenth, n.mute); kick(t); }
+        if (st === 8) { snare(t); crash(t); }
+      }
+      if (st === 0 && bar % 4 === 0) { say(t, 'baphomet', sixteenth); duck(t, 8 * sixteenth); }
+      if (st % 2 === 0) hat(t);
+      if (st === 0 && (bar === 0 || bar === 4)) crash(t);
+    }
     function tick() {
       const boss = api.boss, sixteenth = 60 / (boss ? 168 : 140) / 4;
       while (next < AC.currentTime + 0.12) {
         const cyc = Math.floor(step / 16) % 20, st = step % 16;
         if (!boss && cyc >= 16) { ambient(next, cyc - 16, st, sixteenth); next += sixteenth; step++; continue; }
-        const bar = cyc % 8, row = RIFF[bar];
+        const bar = cyc % 8;
+        if (boss) { bossStep(next, bar, st, sixteenth); next += sixteenth; step++; continue; }
+        const row = RIFF[bar];
         const n = parse(row, st);
         if (n) guitar(next, n.semi, n.len * sixteenth, n.mute);
         const chord = bar === 3 || bar === 7;
-        if (boss && st === 0 && bar % 4 === 0) { say(next, 'baphomet', sixteenth); duck(next, 8 * sixteenth); }
-        if (boss && !chord) { kick(next); if (st === 4 || st === 12) snare(next); }
-        else {
-          if (chord ? st % 8 === 0 : (n || row[st] === '-') && row[st] !== '.' && (n || st % 2 === 0)) kick(next);
-          if (st === 8) snare(next);
-        }
+        if (chord ? st % 8 === 0 : (n || row[st] === '-') && row[st] !== '.' && (n || st % 2 === 0)) kick(next);
+        if (st === 8) snare(next);
         if (st % 2 === 0) hat(next);
         if (st === 0 && (bar === 0 || bar === 4)) crash(next);
         if (chord && st % 8 === 0) crash(next);
@@ -628,6 +671,121 @@ body { background: var(--fondo); color: var(--ink); font-family: var(--body); ov
     };
     return api;
   })();
+
+  // Cozy music for the knitting theme: nylon-guitar arpeggios, a soft upright bass, a music-box melody
+  // and brushes, swung at 92 BPM in F major. The Moth Queen turns it into a nervous D-minor dance at 120.
+  const cozy = (() => {
+    let timer = null, next = 0, step = 0, out = null, room = null, noiseBuf = null;
+    const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+    const CH = { F: [53, 57, 60], Am: [57, 60, 64], Dm: [50, 53, 57], Bb: [46, 50, 53], C: [48, 52, 55], A: [45, 49, 52] };
+    const SONG = ['F', 'Am', 'Dm', 'Bb', 'F', 'Am', 'Bb', 'C'];
+    const MEL = [
+      [69, 0, 72, 0, 74, 0, 72, 0], [69, 0, 0, 67, 69, 0, 0, 0], [65, 0, 69, 0, 72, 0, 74, 0], [72, 0, 0, 69, 67, 0, 0, 0],
+      [74, 0, 72, 0, 69, 0, 72, 0], [74, 0, 76, 0, 77, 0, 0, 0], [72, 0, 69, 0, 67, 0, 65, 0], [67, 0, 0, 0, 65, 0, 0, 0]
+    ];
+    const DANCE = ['Dm', 'Bb', 'C', 'A'];
+    const DANCE_MEL = [[74, 76, 77, 76, 74, 0, 69, 0], [70, 72, 74, 72, 70, 0, 65, 0], [72, 74, 76, 74, 72, 0, 67, 0], [73, 76, 73, 69, 73, 0, 0, 0]];
+    function setup() {
+      const comp = AC.createDynamicsCompressor();
+      comp.threshold.value = -20; comp.ratio.value = 3;
+      const master = AC.createGain(); master.gain.value = 0.5;
+      out = AC.createGain();
+      out.connect(comp).connect(master).connect(AC.destination);
+      noiseBuf = AC.createBuffer(1, AC.sampleRate, AC.sampleRate);
+      const ch = noiseBuf.getChannelData(0);
+      for (let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
+      const len = Math.floor(AC.sampleRate * 1.4), ir = AC.createBuffer(2, len, AC.sampleRate);
+      for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.5); }
+      const conv = AC.createConvolver(); conv.buffer = ir;
+      const wet = AC.createGain(); wet.gain.value = 0.25;
+      room = AC.createGain(); room.connect(conv).connect(wet).connect(out);
+    }
+    function env(g, t, peak, dur, attack = 0.004) {
+      g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    }
+    function osc(type, f, t, end, dest) { const o = AC.createOscillator(); o.type = type; o.frequency.value = f; o.connect(dest); o.start(t); o.stop(end); }
+    // nylon pluck: bright attack that darkens quickly
+    function pluck(t, m, peak = 0.22, dur = 1.1, pan = 0) {
+      const f = hz(m), lp = AC.createBiquadFilter(), g = AC.createGain();
+      lp.type = 'lowpass'; lp.frequency.setValueAtTime(3200, t); lp.frequency.exponentialRampToValueAtTime(700, t + 0.25);
+      env(g, t, peak, dur, 0.002);
+      osc('triangle', f, t, t + dur + 0.05, lp); osc('sawtooth', f, t, t + 0.08, lp); osc('sine', f * 2, t, t + dur * 0.5, lp);
+      const p = AC.createStereoPanner ? AC.createStereoPanner() : AC.createGain(); if (p.pan) p.pan.value = pan;
+      lp.connect(g).connect(p); p.connect(out); p.connect(room);
+    }
+    function bass(t, m, dur) {
+      const g = AC.createGain(), lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500;
+      env(g, t, 0.5, dur, 0.01);
+      osc('sine', hz(m), t, t + dur + 0.05, lp); osc('triangle', hz(m), t, t + dur + 0.05, lp);
+      lp.connect(g).connect(out);
+    }
+    function musicBox(t, m) {
+      const f = hz(m + 12), g = AC.createGain(), g2 = AC.createGain();
+      env(g, t, 0.16, 1.6, 0.002); env(g2, t, 0.04, 0.5, 0.002);
+      osc('sine', f, t, t + 1.7, g); osc('sine', f * 4, t, t + 0.6, g2);
+      g.connect(out); g.connect(room); g2.connect(out); g2.connect(room);
+    }
+    function noise(t, type, fr, peak, dur) {
+      const s = AC.createBufferSource(), fl = AC.createBiquadFilter(), g = AC.createGain();
+      s.buffer = noiseBuf; fl.type = type; fl.frequency.value = fr; env(g, t, peak, dur, 0.002);
+      s.connect(fl).connect(g).connect(out); s.start(t, Math.random() * 0.5); s.stop(t + dur + 0.02);
+    }
+    function softKick(t) {
+      const o = AC.createOscillator(), g = AC.createGain();
+      o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(50, t + 0.1);
+      env(g, t, 0.5, 0.2, 0.002); o.connect(g).connect(out); o.start(t); o.stop(t + 0.22);
+    }
+    function tick() {
+      const boss = api.boss, sixteenth = 60 / (boss ? 120 : 92) / 4;
+      while (next < AC.currentTime + 0.12) {
+        const st = step % 16, e = st >> 1, offbeat = st % 2 === 0 && e % 2 === 1;
+        // swing the off-beat eighths in the calm song
+        const t = next + (!boss && offbeat ? sixteenth * 0.33 : 0);
+        if (boss) {
+          const bar = Math.floor(step / 16) % 4, c = CH[DANCE[bar]];
+          pluck(t, c[[0, 1, 2, 1][st % 4]] + (st >= 8 ? 12 : 0), 0.16, 0.35, st % 2 ? 0.3 : -0.3);
+          if (st % 2 === 0) { const m = DANCE_MEL[bar][e]; if (m) { musicBox(t, m); pluck(t, m, 0.12, 0.3, 0.1); } }
+          if (st % 4 === 0) softKick(t);
+          if (st === 4 || st === 12) noise(t, 'bandpass', 1800, 0.35, 0.05);
+          noise(t, 'highpass', 6500, st % 2 ? 0.06 : 0.12, 0.05);
+          if (st % 8 === 0) bass(t, c[0] - 12, 8 * sixteenth);
+        } else if (st % 2 === 0) {
+          const bar = Math.floor(step / 16) % 8, c = CH[SONG[bar]];
+          const arp = [c[0], c[2], c[1] + 12, c[2], c[0] + 12, c[2], c[1] + 12, c[2]][e];
+          pluck(t, arp, 0.2, 1.1, e % 2 ? 0.25 : -0.25);
+          const m = MEL[bar][e]; if (m) musicBox(t, m);
+          if (e === 0 || e === 4) { bass(t, c[0] - 12, 4 * sixteenth * 1.8); softKick(t); }
+          if (e === 7) bass(t, c[2] - 12, 2 * sixteenth);
+          if (e === 2 || e === 6) noise(t, 'bandpass', 1600, 0.18, 0.06);
+          noise(t, 'highpass', 6000, 0.07, 0.09);
+        }
+        next += sixteenth; step++;
+      }
+    }
+    const api = {
+      boss: false,
+      start() {
+        if (!AC || muted || timer) return;
+        if (!out) setup();
+        out.gain.cancelScheduledValues(AC.currentTime); out.gain.setValueAtTime(1, AC.currentTime);
+        next = AC.currentTime + 0.06; step = 0;
+        timer = setInterval(tick, 25); tick();
+      },
+      stop() {
+        if (!timer) return;
+        clearInterval(timer); timer = null;
+        out.gain.cancelScheduledValues(AC.currentTime); out.gain.setTargetAtTime(0.0001, AC.currentTime, 0.12);
+      }
+    };
+    return api;
+  })();
+
+  // whichever soundtrack fits the current theme
+  const music = {
+    set boss(v) { metal.boss = v; cozy.boss = v; },
+    start() { (inf() ? metal : cozy).start(); },
+    stop() { metal.stop(); cozy.stop(); }
+  };
 
   // ---------- helpers ----------
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -1909,16 +2067,16 @@ body { background: var(--fondo); color: var(--ink); font-family: var(--body); ov
     G = fresh('play');
     clearBlanket();
     startWave(1);
-    if (inf()) music.start();
+    music.start();
     show(null); hud();
   }
   function togglePause() {
     if (G.state === 'play') { G.state = 'paused'; show('paused'); $('resume').focus(); music.stop(); }
-    else if (G.state === 'paused') { G.state = 'play'; show(null); if (inf()) music.start(); }
+    else if (G.state === 'paused') { G.state = 'play'; show(null); music.start(); }
   }
   function toggleMute() {
     muted = !muted; store.set('lazo.muted', muted);
-    if (muted) music.stop(); else if (G && G.state === 'play' && inf()) music.start();
+    if (muted) music.stop(); else if (G && G.state === 'play') music.start();
     $('mute').textContent = muted ? '×' : '♪';
     $('mute').setAttribute('aria-label', muted ? 'Activar sonido' : 'Silenciar');
   }
