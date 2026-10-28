@@ -359,7 +359,7 @@ body { background: var(--fondo); color: var(--ink); font-family: var(--body); ov
   for (const k of Object.keys(sfx)) { const soft = sfx[k]; sfx[k] = (...a) => (inf() ? HELL[k] : soft)(...a); }
 
   // DOOM-style metal for the hell theme, synthesized live. Drop-C guitars double-tracked left and right,
-  // a gritty bass, punchy drums with a room reverb, and a screaming lead when the boss is out.
+  // a gritty bass, punchy drums with a room reverb, and the boss growling its own name.
   const music = (() => {
     let timer = null, next = 0, step = 0, out = null, gtrL = null, gtrR = null, bassIn = null, room = null, noiseBuf = null;
     const C2 = 65.41;
@@ -375,10 +375,6 @@ body { background: var(--fondo); color: var(--ink); font-family: var(--body); ov
       'xxx.xxx.xxx.A-A-',
       'F---A---X-------'
     ];
-    const LEAD = [
-      '................', '................', '................', '................',
-      'O-------F---A---', 'C---B---A-------', 'O---F---O---F---', 'F-------C-B-A---'
-    ];
     const parse = (row, i) => {
       const ch = row[i];
       if (ch === '.' || ch === '-') return null;
@@ -391,6 +387,14 @@ body { background: var(--fondo); color: var(--ink); font-family: var(--body); ov
       for (let i = 0; i < n; i++) { const x = i * 2 / n - 1; c[i] = (1 + k) * x / (1 + k * Math.abs(x)); }
       return c;
     }
+    const gtrLevels = [];
+    // pull the guitars down while the voice speaks so the word is clear
+    function duck(t, dur) {
+      for (const g of gtrLevels) {
+        g.gain.setTargetAtTime(0.13, t, 0.02);
+        g.gain.setTargetAtTime(0.32, t + dur, 0.08);
+      }
+    }
     function amp(pan) {
       // gain -> fuzz -> tighten lows -> presence -> cabinet roll-off -> pan
       const pre = AC.createGain(); pre.gain.value = 3;
@@ -398,7 +402,7 @@ body { background: var(--fondo); color: var(--ink); font-family: var(--body); ov
       const hp = AC.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 85;
       const pres = AC.createBiquadFilter(); pres.type = 'peaking'; pres.frequency.value = 1600; pres.gain.value = 5; pres.Q.value = 0.9;
       const cab = AC.createBiquadFilter(); cab.type = 'lowpass'; cab.frequency.value = 5200; cab.Q.value = 0.7;
-      const lvl = AC.createGain(); lvl.gain.value = 0.32;
+      const lvl = AC.createGain(); lvl.gain.value = 0.32; gtrLevels.push(lvl);
       const p = AC.createStereoPanner ? AC.createStereoPanner() : AC.createGain();
       if (p.pan) p.pan.value = pan;
       pre.connect(sh).connect(hp).connect(pres).connect(cab).connect(lvl).connect(p).connect(out);
@@ -447,15 +451,6 @@ body { background: var(--fondo); color: var(--ink); font-family: var(--body); ov
       const g = AC.createGain(); env(g, t, 0.7, mute ? 0.13 : dur);
       osc('sawtooth', f / 2, t, t + dur + 0.05, g); osc('sine', f / 2, t, t + dur + 0.05, g);
       g.connect(bassIn);
-    }
-    function lead(t, semi, dur) {
-      const f = C2 * 8 * Math.pow(2, semi / 12), g = AC.createGain(), lp = AC.createBiquadFilter();
-      lp.type = 'lowpass'; lp.frequency.value = 6000;
-      env(g, t, 0.28, dur * 0.98, 0.02);
-      const vib = AC.createOscillator(), vg = AC.createGain(); vib.frequency.value = 6; vg.gain.value = f * 0.02;
-      vib.connect(vg); vib.start(t + dur * 0.3); vib.stop(t + dur + 0.05);
-      [0, 7].forEach(det => { const o = osc('sawtooth', f, t, t + dur + 0.05, lp, det); vg.connect(o.frequency); });
-      lp.connect(g); g.connect(gtrL); g.connect(gtrR);
     }
     function noise(t, type, fr, peak, dur, dest = out, q = 0.7) {
       const s = AC.createBufferSource(), fl = AC.createBiquadFilter(), g = AC.createGain();
@@ -529,9 +524,8 @@ body { background: var(--fondo); color: var(--ink); font-family: var(--body); ov
     }
     // a word is a list of syllables: [onset consonant, vowel, length in 16ths, coda consonant]
     const WORDS = {
-      baphomet: [['b', 'a', 2], ['f', 'o', 2], ['m', 'e', 3, 't']],
-      die: [['d', 'a', 3], ['', 'i', 3]],
-      argh: [['', 'a', 8]]
+      baphomet: [['b', 'a', 2], ['f', 'o', 2], ['m', 'e', 3, 't']]
+
     };
     function say(t, word, sixteenth) {
       let at = t;
@@ -539,7 +533,7 @@ body { background: var(--fondo); color: var(--ink); font-family: var(--body); ov
         const dur = len * sixteenth;
         if (on && on !== 'r') { consonant(at, on); }
         const start = at + (on === 'm' ? 0.06 : on ? 0.02 : 0);
-        growl(start, v, Math.max(0.08, dur - (start - at)), word === 'argh' ? 95 : 82, on === 'r' || word === 'argh');
+        growl(start, v, Math.max(0.08, dur - (start - at)), 82, on === 'r');
         if (coda) consonant(at + dur - 0.02, coda);
         at += dur;
       }
@@ -551,11 +545,8 @@ body { background: var(--fondo); color: var(--ink); font-family: var(--body); ov
         const bar = Math.floor(step / 16) % 8, st = step % 16, row = RIFF[bar];
         const n = parse(row, st);
         if (n) guitar(next, n.semi, n.len * sixteenth, n.mute);
-        if (boss || bar >= 6) { const l = parse(LEAD[bar], st); if (l) lead(next, l.semi, l.len * sixteenth); }
         const chord = bar === 3 || bar === 7;
-        if (boss && st === 0 && bar % 8 === 3) say(next, 'argh', sixteenth);
-        else if (boss && st === 0 && bar % 2 === 0) say(next, 'baphomet', sixteenth);
-        else if (boss && st === 8 && bar % 2 === 1) say(next, 'die', sixteenth);
+        if (boss && st === 0 && bar % 4 === 0) { say(next, 'baphomet', sixteenth); duck(next, 8 * sixteenth); }
         if (boss && !chord) { kick(next); if (st === 4 || st === 12) snare(next); }
         else {
           if (chord ? st % 8 === 0 : (n || row[st] === '-') && row[st] !== '.' && (n || st % 2 === 0)) kick(next);
